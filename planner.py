@@ -26,6 +26,13 @@ class MotionPlannerObjective(th.Objective):
         safety_distance: float,
         local_map_size: int,
         dtype: torch.dtype = torch.double,
+        goal_cost: float = 50,
+        acceleration_cost: float = 100,
+        control_cost: float = 100,
+        velocity_cost: float = 100,
+        current_state_cost: float = 2000,
+        dynamic_cost: float = 2000,
+        collision_cost: float = 500,
     ):
         super().__init__(dtype=dtype)
 
@@ -51,14 +58,14 @@ class MotionPlannerObjective(th.Objective):
         # -------- Cost Weights --------
         goal_cost_weight = th.DiagonalCostWeight(
             th.Variable(
-                torch.tensor([[100, 100]], dtype=dtype),
+                torch.tensor([[goal_cost, goal_cost]], dtype=dtype),
                 name="goal_cost_weight_variable",
             ),
             name="goal_cost_weight",
         )
         quadratic_acceleration_cost_weight = th.DiagonalCostWeight(
             th.Variable(
-                torch.tensor([[50, 30]], dtype=dtype),
+                torch.tensor([[acceleration_cost, acceleration_cost]], dtype=dtype),
                 name="quadratic_acceleration_cost_weight_variable",
             ),
             name="quadratic_acceleration_cost_weight",
@@ -67,32 +74,36 @@ class MotionPlannerObjective(th.Objective):
         # -------- Constraint Cost Weights --------
         control_cost_weight = th.ScaleCostWeight(
             th.Variable(
-                torch.tensor(500, dtype=dtype), name="control_cost_weight_variable"
+                torch.tensor(control_cost, dtype=dtype),
+                name="control_cost_weight_variable",
             ),
             name="control_cost_weight",
         )
         velocity_cost_weight = th.ScaleCostWeight(
             th.Variable(
-                torch.tensor(500, dtype=dtype), name="velocity_cost_weight_variable"
+                torch.tensor(velocity_cost, dtype=dtype),
+                name="velocity_cost_weight_variable",
             ),
             name="velocity_cost_weight",
         )
         current_state_cost_weight = th.DiagonalCostWeight(
             th.Variable(
-                torch.tensor([[500.0, 500.0]], dtype=dtype),
+                torch.tensor([[current_state_cost, current_state_cost]], dtype=dtype),
                 name="current_state_cost_weight_variable",
             ),
             name="current_state_cost_weight",
         )
         dynamic_cost_weight = th.ScaleCostWeight(
             th.Variable(
-                torch.tensor(500, dtype=dtype), name="dynamic_cost_weight_variable"
+                torch.tensor(dynamic_cost, dtype=dtype),
+                name="dynamic_cost_weight_variable",
             ),
             name="dynamic_cost_weight",
         )
         collision_cost_weight = th.ScaleCostWeight(
             th.Variable(
-                torch.tensor(700, dtype=dtype), name="collision_cost_weight_variable"
+                torch.tensor(collision_cost, dtype=dtype),
+                name="collision_cost_weight_variable",
             ),
             name="collision_cost_weight",
         )

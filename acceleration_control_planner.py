@@ -6,7 +6,7 @@ from theseus.embodied import Collision2D, HingeCost
 
 from costs import (
     _BothXYDifference,
-    _QuadraticAccelerationCost,
+    _QuadraticVectorCost,
     _TripleIntegrator,
     _XYDifference,
 )
@@ -27,9 +27,9 @@ class MotionPlannerObjective(th.Objective):
         local_map_size: int,
         dtype: torch.dtype = torch.double,
         goal_cost: float = 50,
-        acceleration_cost: float = 100,
-        control_cost: float = 100,
-        velocity_cost: float = 100,
+        quadratic_acceleration_cost: float = 100,
+        velocity_bounds_cost: float = 100,
+        acceleration_bounds_cost: float = 100,
         current_state_cost: float = 2000,
         dynamic_cost: float = 2000,
         collision_cost: float = 500,
@@ -65,26 +65,29 @@ class MotionPlannerObjective(th.Objective):
         )
         quadratic_acceleration_cost_weight = th.DiagonalCostWeight(
             th.Variable(
-                torch.tensor([[acceleration_cost, acceleration_cost]], dtype=dtype),
+                torch.tensor(
+                    [[quadratic_acceleration_cost, quadratic_acceleration_cost]],
+                    dtype=dtype,
+                ),
                 name="quadratic_acceleration_cost_weight_variable",
             ),
             name="quadratic_acceleration_cost_weight",
         )
 
         # -------- Constraint Cost Weights --------
-        control_cost_weight = th.ScaleCostWeight(
+        velocity_bounds_cost_weight = th.ScaleCostWeight(
             th.Variable(
-                torch.tensor(control_cost, dtype=dtype),
-                name="control_cost_weight_variable",
+                torch.tensor(velocity_bounds_cost, dtype=dtype),
+                name="velocity_bounds_cost_weight_variable",
             ),
-            name="control_cost_weight",
+            name="velocity_bounds_cost_weight",
         )
-        velocity_cost_weight = th.ScaleCostWeight(
+        acceleration_bounds_cost_weight = th.ScaleCostWeight(
             th.Variable(
-                torch.tensor(velocity_cost, dtype=dtype),
-                name="velocity_cost_weight_variable",
+                torch.tensor(acceleration_bounds_cost, dtype=dtype),
+                name="acceleration_bounds_cost_weight_variable",
             ),
-            name="velocity_cost_weight",
+            name="acceleration_bounds_cost_weight",
         )
         current_state_cost_weight = th.DiagonalCostWeight(
             th.Variable(
@@ -144,7 +147,7 @@ class MotionPlannerObjective(th.Objective):
         )
         for acceleration in accelerations[1:]:
             self.add(
-                _QuadraticAccelerationCost(
+                _QuadraticVectorCost(
                     acceleration,
                     zero_acceleration,
                     quadratic_acceleration_cost_weight,
@@ -153,7 +156,7 @@ class MotionPlannerObjective(th.Objective):
             )
 
         # -------- Soft Constraints --------
-        ## Control bounds costs
+        ## Acceleration bounds costs
         zero_threshold = th.Vector(
             tensor=torch.tensor([0, 0], dtype=dtype),
             name="zero_threshold",
@@ -188,12 +191,12 @@ class MotionPlannerObjective(th.Objective):
                     down_limit=lower_acceleration_bounds,
                     up_limit=upper_acceleration_bounds,
                     threshold=zero_threshold,
-                    cost_weight=control_cost_weight,
+                    cost_weight=acceleration_bounds_cost_weight,
                     name="linear_acceleration_bounds_{}".format(acceleration.name),
                 )
             )
 
-        ## Velocity bound costs
+        ## Velocity bounds costs
         previous_velocity = current_velocity.tensor
         velocity_bounds = (
             torch.tensor([x_velocity_bounds[0], y_velocity_bounds[0]], dtype=dtype),
@@ -207,7 +210,7 @@ class MotionPlannerObjective(th.Objective):
                     down_limit=(velocity_bounds[0] - previous_velocity) / dt.tensor,
                     up_limit=(velocity_bounds[1] - previous_velocity) / dt.tensor,
                     threshold=zero_threshold,
-                    cost_weight=velocity_cost_weight,
+                    cost_weight=velocity_bounds_cost_weight,
                     name="velocity_bounds_{}".format(acceleration.name),
                 )
             )
@@ -239,6 +242,7 @@ class MotionPlannerObjective(th.Objective):
                 name="current_state_cost",
             )
         )
+
         ## Collision cost
         for i in range(1, horizon + 1):
             self.add(

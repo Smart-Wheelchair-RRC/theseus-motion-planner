@@ -6,6 +6,98 @@ from theseus.core import CostFunction, CostWeight, Variable, as_variable
 from theseus.geometry import SE2, Vector
 
 
+class _DoubleIntegrator(CostFunction):
+    def __init__(
+        self,
+        pose1: SE2,
+        vel1: Vector,
+        pose2: SE2,
+        vel2: Vector,
+        dt: Union[float, torch.Tensor, Variable],
+        cost_weight: CostWeight,
+        name: Optional[str] = None,
+    ):
+        super().__init__(cost_weight, name=name)
+        self.dt = as_variable(dt)
+        if self.dt.tensor.squeeze().ndim > 1:
+            raise ValueError(
+                "dt data must be a 0-D or 1-D tensor with numel in {1, batch_size}."
+            )
+        self.dt.tensor = self.dt.tensor.view(-1, 1)
+        self.pose1 = pose1
+        self.vel1 = vel1
+        self.pose2 = pose2
+        self.vel2 = vel2
+        self.register_optim_vars(["pose1", "vel1", "pose2", "vel2"])
+        self.register_aux_vars(["dt"])
+        self.weight = cost_weight
+
+    def dim(self):
+        return 2 * self.vel1.dof()
+
+    def _new_pose_diff(
+        self,
+        jacobians_local: Optional[List[torch.Tensor]] = None,
+        jacobians_xy_1: Optional[List[torch.Tensor]] = None,
+        jacobians_xy_2: Optional[List[torch.Tensor]] = None,
+    ) -> torch.Tensor:
+        return self.pose1.xy(jacobians=jacobians_xy_1).local(
+            self.pose2.xy(jacobians=jacobians_xy_2), jacobians=jacobians_local
+        )
+
+    def _error_from_pose_diff(self, pose_diff: torch.Tensor) -> torch.Tensor:
+        pose_diff_err = pose_diff - self.dt.tensor.view(-1, 1) * self.vel1.tensor
+        vel_diff = self.vel2.tensor - self.vel1.tensor
+        return torch.cat([pose_diff_err, vel_diff], dim=1)
+
+    def error(self) -> torch.Tensor:
+        return self._error_from_pose_diff(self._new_pose_diff())
+
+    def jacobians(self) -> Tuple[List[torch.Tensor], torch.Tensor]:
+        # Pre-allocate jacobian tensors
+        batch_size = self.pose1.shape[0]
+        out_dof = self.vel1.dof()
+        pose_dof = self.pose1.dof()
+        dtype = self.pose1.dtype
+        device = self.pose1.device
+        Jerr_pose1 = torch.zeros(
+            batch_size, 2 * out_dof, pose_dof, dtype=dtype, device=device
+        )
+        Jerr_vel1 = torch.zeros(
+            batch_size, 2 * out_dof, out_dof, dtype=dtype, device=device
+        )
+        Jerr_pose2 = torch.zeros_like(Jerr_pose1)
+        Jerr_vel2 = torch.zeros_like(Jerr_vel1)
+
+        Jlocal: List[torch.Tensor] = []
+        Jxy1: List[torch.Tensor] = []
+        Jxy2: List[torch.Tensor] = []
+        error = self._error_from_pose_diff(self._new_pose_diff(Jlocal, Jxy1, Jxy2))
+        Jlocal[0] = Jlocal[0].matmul(Jxy1[0])
+        Jlocal[1] = Jlocal[1].matmul(Jxy2[0])
+
+        Jerr_pose1[:, :out_dof, :] = Jlocal[0]
+        identity = torch.eye(out_dof, dtype=dtype, device=device).repeat(
+            batch_size, 1, 1
+        )
+        Jerr_vel1[:, :out_dof, :] = -self.dt.tensor.view(-1, 1, 1) * identity
+        Jerr_vel1[:, out_dof:, :] = -identity
+        Jerr_pose2[:, :out_dof, :] = Jlocal[1]
+        Jerr_vel2[:, out_dof:, :] = identity
+        return [Jerr_pose1, Jerr_vel1, Jerr_pose2, Jerr_vel2], error
+
+    def _copy_impl(self, new_name: Optional[str] = None) -> "_DoubleIntegrator":
+        return _DoubleIntegrator(
+            self.pose1.copy(),
+            self.vel1.copy(),
+            self.pose2.copy(),
+            self.vel2.copy(),
+            self.dt.copy(),
+            self.weight.copy(),
+            name=new_name,
+        )
+
+
 class _TripleIntegrator(CostFunction):
     def __init__(
         self,
@@ -129,7 +221,7 @@ class _TripleIntegrator(CostFunction):
         )
 
 
-class _QuadraticAccelerationCost(th.CostFunction):
+class _QuadraticVectorCost(th.CostFunction):
     def __init__(
         self,
         var: th.Vector,
@@ -141,7 +233,7 @@ class _QuadraticAccelerationCost(th.CostFunction):
 
         if not isinstance(var, th.Vector) and not isinstance(target, th.Vector):
             raise ValueError(
-                "QuadraticVelocityCost expects var and target of type Vector."
+                "_QuadraticVectorCost expects var and target of type Vector."
             )
 
         self.var = var
@@ -167,10 +259,8 @@ class _QuadraticAccelerationCost(th.CostFunction):
     def dim(self) -> int:
         return self.var.dof()
 
-    def _copy_impl(
-        self, new_name: Optional[str] = None
-    ) -> "_QuadraticAccelerationCost":
-        return _QuadraticAccelerationCost(  # type: ignore
+    def _copy_impl(self, new_name: Optional[str] = None) -> "_QuadraticVectorCost":
+        return _QuadraticVectorCost(  # type: ignore
             self.var.copy(), self.target.copy(), self.weight.copy(), name=new_name
         )
 

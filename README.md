@@ -1,1 +1,1 @@
-# theseus-mpc
+# theseus-motion-planner

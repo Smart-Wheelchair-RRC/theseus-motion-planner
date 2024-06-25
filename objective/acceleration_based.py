@@ -40,9 +40,6 @@ class MotionPlannerObjective(th.Objective):
         current_state = th.SE2(name="current_state", dtype=dtype)
         current_velocity = th.Vector(dof=2, name="current_velocity", dtype=dtype)
         goal_position = th.Point2(name="goal_position", dtype=dtype)
-        current_velocity: th.Vector = th.Vector(
-            tensor=current_velocity, name="current_velocity", dtype=dtype
-        )
         dt: th.Variable = th.Variable(
             torch.tensor(total_time / horizon, dtype=dtype).view(1, 1), name="dt"
         )

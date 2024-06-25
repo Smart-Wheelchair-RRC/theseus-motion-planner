@@ -53,7 +53,7 @@ class MotionPlannerObjective(th.Objective):
             torch.empty(1, local_map_size, local_map_size, dtype=dtype), name="sdf_data"
         )
 
-        # -------- Cost Weights -------- TODO
+        # -------- Cost Weights --------
         goal_cost_weight = th.DiagonalCostWeight(
             th.Variable(
                 torch.tensor([[goal_cost, goal_cost]], dtype=dtype),

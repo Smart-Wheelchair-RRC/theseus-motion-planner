@@ -26,18 +26,19 @@ class MotionPlannerObjective(th.Objective):
         local_map_size: int,
         dtype: torch.dtype = torch.double,
         goal_cost: float = 50,
-        quadratic_velocity_cost: float = 50,
-        quadratic_acceleration_cost: float = 50,
-        velocity_bounds_cost: float = 100,
-        acceleration_bounds_cost: float = 100,
+        quadratic_velocity_cost: float = 10,
+        quadratic_acceleration_cost: float = 10,
+        velocity_bounds_cost: float = 2000,
+        acceleration_bounds_cost: float = 2000,
         current_state_cost: float = 2000,
         dynamic_cost: float = 2000,
-        collision_cost: float = 500,
+        collision_cost: float = 2000,
     ):
         super().__init__(dtype=dtype)
 
         # -------- Auxiliary variables --------
         current_state = th.SE2(name="current_state", dtype=dtype)
+        current_velocity = th.Vector(dof=2, name="current_velocity", dtype=dtype)
         goal_position = th.Point2(name="goal_position", dtype=dtype)
         dt: th.Variable = th.Variable(
             torch.tensor(total_time / horizon, dtype=dtype).view(1, 1), name="dt"
@@ -163,13 +164,13 @@ class MotionPlannerObjective(th.Objective):
         )
 
         ## Velocity costs
-        for velocity in velocities:
+        for velocity in velocities[1:]:
             self.add(
                 _QuadraticVectorCost(
                     velocity,
                     zero_vector,
                     quadratic_velocity_cost_weight,
-                    name="quadratic_velocity_cost_{}".format(velocity.name),
+                    name="quadratic_cost_{}".format(velocity.name),
                 )
             )
 
@@ -180,7 +181,7 @@ class MotionPlannerObjective(th.Objective):
                     acceleration,
                     zero_vector,
                     quadratic_acceleration_cost_weight,
-                    name="quadratic_acceleration_cost_{}".format(acceleration.name),
+                    name="quadratic_cost_{}".format(acceleration.name),
                 )
             )
 
@@ -222,7 +223,7 @@ class MotionPlannerObjective(th.Objective):
                     up_limit=upper_velocity_bounds,
                     threshold=zero_threshold,
                     cost_weight=velocity_bounds_cost_weight,
-                    name="velocity_bounds_{}".format(velocity.name),
+                    name="bounds_{}".format(velocity.name),
                 )
             )
 
@@ -257,21 +258,21 @@ class MotionPlannerObjective(th.Objective):
                     up_limit=upper_acceleration_bounds,
                     threshold=zero_threshold,
                     cost_weight=acceleration_bounds_cost_weight,
-                    name="acceleration_bounds_{}".format(acceleration.name),
+                    name="bounds_{}".format(acceleration.name),
                 )
             )
 
         ## Second Order Dynamics Cost
-        for i in range(horizon - 1):
+        for timestep in range(horizon - 1):
             self.add(
                 _DoubleIntegrator(
-                    states[i],
-                    velocities[i],
-                    states[i + 1],
-                    velocities[i + 1],
+                    states[timestep],
+                    velocities[timestep],
+                    states[timestep + 1],
+                    velocities[timestep + 1],
                     dt,
                     dynamic_cost_weight,
-                    name="double_integrator_cost_{}".format(i),
+                    name="double_integrator_cost_{}".format(timestep),
                 )
             )
 
@@ -280,21 +281,29 @@ class MotionPlannerObjective(th.Objective):
             _BothXYDifference(
                 states[0],
                 current_state,
-                current_state_cost_weight,
+                cost_weight=current_state_cost_weight,
                 name="current_state_cost",
+            )
+        )
+        self.add(
+            th.Difference(
+                velocities[0],
+                current_velocity,
+                cost_weight=current_state_cost_weight,
+                name="current_velocity_cost",
             )
         )
 
         ## Collision cost
-        for i in range(1, horizon + 1):
+        for timestep in range(1, horizon + 1):
             self.add(
                 Collision2D(
-                    states[i],
+                    states[timestep],
                     sdf_origin=sdf_origin,
                     sdf_data=sdf_data,
                     sdf_cell_size=cell_size,
                     cost_eps=collision_cost_eps,
                     cost_weight=collision_cost_weight,
-                    name="collision_cost_{}".format(i),
+                    name="collision_cost_{}".format(timestep),
                 )
             )

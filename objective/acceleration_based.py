@@ -4,10 +4,10 @@ import theseus as th
 import torch
 from theseus.embodied import Collision2D, HingeCost
 
-from costs import (
+from objective.costs import (
     _BothXYDifference,
-    _DoubleIntegrator,
     _QuadraticVectorCost,
+    _TripleIntegrator,
     _XYDifference,
 )
 
@@ -40,6 +40,9 @@ class MotionPlannerObjective(th.Objective):
         current_state = th.SE2(name="current_state", dtype=dtype)
         current_velocity = th.Vector(dof=2, name="current_velocity", dtype=dtype)
         goal_position = th.Point2(name="goal_position", dtype=dtype)
+        current_velocity: th.Vector = th.Vector(
+            tensor=current_velocity, name="current_velocity", dtype=dtype
+        )
         dt: th.Variable = th.Variable(
             torch.tensor(total_time / horizon, dtype=dtype).view(1, 1), name="dt"
         )
@@ -53,7 +56,7 @@ class MotionPlannerObjective(th.Objective):
             torch.empty(1, local_map_size, local_map_size, dtype=dtype), name="sdf_data"
         )
 
-        # -------- Cost Weights -------- TODO
+        # -------- Cost Weights --------
         goal_cost_weight = th.DiagonalCostWeight(
             th.Variable(
                 torch.tensor([[goal_cost, goal_cost]], dtype=dtype),
@@ -120,30 +123,34 @@ class MotionPlannerObjective(th.Objective):
 
         # -------- Optimization variables --------
         states: List[th.SE2] = []  # Length = N + 1
-        velocities: List[th.Vector] = []  # Length = N
+        accelerations: List[th.Vector] = []  # Length = N
 
         for timestep in range(horizon + 1):
             states.append(th.SE2(name="state_{}".format(timestep), dtype=dtype))
 
         for timestep in range(horizon):
-            velocities.append(
+            accelerations.append(
                 th.Vector(
                     dof=2,
-                    name="velocity_{}".format(timestep),
+                    name="acceleration_{}".format(timestep),
                     dtype=dtype,
                 )
             )
 
         # -------- Derived Variables --------
-        accelerations: List[th.Vector] = [
-            th.Vector(
-                tensor=(velocities[timestep].tensor - velocities[timestep - 1].tensor)
-                / dt.tensor,
-                dtype=dtype,
-                name=f"acceleration_{timestep}",
+        velocities: List[th.Vector] = [
+            th.Vector(tensor=current_velocity, name="velocity_0", dtype=dtype)
+        ]
+
+        for timestep in range(1, horizon + 1):
+            velocities.append(
+                th.Vector(
+                    tensor=velocities[timestep - 1].tensor
+                    + dt.tensor * accelerations[timestep - 1].tensor,
+                    name="velocity_{}".format(timestep),
+                )
             )
-            for timestep in range(1, horizon)
-        ]  # Length = N - 1
+        # Length = N + 1
 
         # -------- Cost Functions --------
         ## Goal cost
@@ -262,17 +269,18 @@ class MotionPlannerObjective(th.Objective):
                 )
             )
 
-        ## Second Order Dynamics Cost
+        ## Third Order Dynamics Cost
         for timestep in range(horizon - 1):
             self.add(
-                _DoubleIntegrator(
+                _TripleIntegrator(
                     states[timestep],
-                    velocities[timestep],
+                    velocities[timestep].tensor,
+                    accelerations[timestep],
                     states[timestep + 1],
-                    velocities[timestep + 1],
+                    accelerations[timestep + 1],
                     dt,
                     dynamic_cost_weight,
-                    name="double_integrator_cost_{}".format(timestep),
+                    name="triple_integrator_cost_{}".format(timestep),
                 )
             )
 
@@ -281,16 +289,8 @@ class MotionPlannerObjective(th.Objective):
             _BothXYDifference(
                 states[0],
                 current_state,
-                cost_weight=current_state_cost_weight,
+                current_state_cost_weight,
                 name="current_state_cost",
-            )
-        )
-        self.add(
-            th.Difference(
-                velocities[0],
-                current_velocity,
-                cost_weight=current_state_cost_weight,
-                name="current_velocity_cost",
             )
         )
 

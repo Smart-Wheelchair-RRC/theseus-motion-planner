@@ -3,9 +3,7 @@ from typing import List, Tuple
 import theseus as th
 import torch
 
-from objective.costs import (
-    _TripleIntegrator,
-)
+from objective.costs import _TripleIntegrator
 from objective.objective import MotionPlannerObjective
 
 

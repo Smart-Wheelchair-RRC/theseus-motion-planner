@@ -244,7 +244,7 @@ class MotionPlannerObjective(th.Objective, metaclass=ABCMeta):
                 )
             )
 
-        ## Second Order Dynamics Cost
+        ## Dynamics Cost
         for timestep in range(horizon - 1):
             self.add(self._get_dynamics_cost(timestep))
 
@@ -257,14 +257,6 @@ class MotionPlannerObjective(th.Objective, metaclass=ABCMeta):
                 name="current_state_cost",
             )
         )
-        # self.add(
-        #     th.Difference(
-        #         self.velocities[0],
-        #         self.current_velocity,
-        #         cost_weight=self.current_state_cost_weight,
-        #         name="current_velocity_cost",
-        #     )
-        # )
 
         ## Collision cost
         for timestep in range(1, horizon + 1):
